@@ -4,19 +4,19 @@ from pydantic import Field
 from functools import lru_cache
 
 
-def _inject_streamlit_secrets():
+def _load_streamlit_secrets():
     """
-    On Streamlit Cloud, secrets are in st.secrets, not in environment variables.
-    Inject them into os.environ so pydantic-settings can pick them up.
+    Inject Streamlit Cloud secrets into os.environ before Settings is constructed.
+    Safe to call multiple times — uses setdefault so existing env vars win.
     """
     try:
         import streamlit as st
-        if hasattr(st, "secrets") and len(st.secrets) > 0:
-            for key, value in st.secrets.items():
-                if isinstance(value, str):
-                    os.environ.setdefault(key.upper(), value)
+        secrets = st.secrets.to_dict() if hasattr(st.secrets, "to_dict") else dict(st.secrets)
+        for key, value in secrets.items():
+            if isinstance(value, str):
+                os.environ.setdefault(key.upper(), value)
     except Exception:
-        pass  # Not running in Streamlit context — no-op
+        pass
 
 
 class Settings(BaseSettings):
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     # Embeddings
     embedding_model: str = Field(
-        "sentence-transformers/all-mpnet-base-v2", env="EMBEDDING_MODEL"
+        "sentence-transformers/all-MiniLM-L6-v2", env="EMBEDDING_MODEL"
     )
 
     # RAG
@@ -43,20 +43,25 @@ class Settings(BaseSettings):
     chunk_size: int = Field(1000, env="CHUNK_SIZE")
     chunk_overlap: int = Field(150, env="CHUNK_OVERLAP")
 
-    # Redis cache (optional — leave empty to disable)
+    # Redis cache (optional)
     redis_url: str = Field("", env="REDIS_URL")
 
-    # Observability & Traceability (LangSmith)
+    # LangSmith (optional)
     langsmith_tracing: bool = Field(False, env="LANGSMITH_TRACING")
     langsmith_api_key: str = Field("", env="LANGSMITH_API_KEY")
     langsmith_project: str = Field("resume-interview-agent", env="LANGSMITH_PROJECT")
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
 
 @lru_cache()
 def get_settings() -> Settings:
-    _inject_streamlit_secrets()
+    # Must inject before constructing Settings
+    _load_streamlit_secrets()
     settings = Settings()
     if settings.langsmith_tracing and settings.langsmith_api_key:
         os.environ["LANGCHAIN_TRACING_V2"] = "true"
