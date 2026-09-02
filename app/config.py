@@ -4,6 +4,21 @@ from pydantic import Field
 from functools import lru_cache
 
 
+def _inject_streamlit_secrets():
+    """
+    On Streamlit Cloud, secrets are in st.secrets, not in environment variables.
+    Inject them into os.environ so pydantic-settings can pick them up.
+    """
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets") and len(st.secrets) > 0:
+            for key, value in st.secrets.items():
+                if isinstance(value, str):
+                    os.environ.setdefault(key.upper(), value)
+    except Exception:
+        pass  # Not running in Streamlit context — no-op
+
+
 class Settings(BaseSettings):
     # Groq
     groq_api_key: str = Field(..., env="GROQ_API_KEY")
@@ -41,8 +56,8 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
+    _inject_streamlit_secrets()
     settings = Settings()
-    # If LangSmith is configured, inject standard LangChain tracing environment variables
     if settings.langsmith_tracing and settings.langsmith_api_key:
         os.environ["LANGCHAIN_TRACING_V2"] = "true"
         os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
