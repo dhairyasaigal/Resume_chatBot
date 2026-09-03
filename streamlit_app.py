@@ -16,15 +16,6 @@ import streamlit as st
 from dotenv import load_dotenv
 load_dotenv()
 
-# Inject Streamlit Cloud secrets into env BEFORE any other import touches config
-try:
-    _secrets = st.secrets.to_dict() if hasattr(st.secrets, "to_dict") else dict(st.secrets)
-    for _k, _v in _secrets.items():
-        if isinstance(_v, str):
-            os.environ.setdefault(_k.upper(), _v)
-except Exception:
-    pass
-
 import uuid
 from datetime import datetime
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage

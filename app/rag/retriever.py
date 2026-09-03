@@ -48,10 +48,31 @@ def _detect_target_source(query: str) -> str | None:
 
 def retrieve(query: str) -> list[Document]:
     """
-    Perform semantic similarity search against the Qdrant collection.
+    Hybrid retrieval: if query targets a specific source, fetch those chunks first,
+    then fill remaining slots with general semantic search results.
     """
     settings = get_settings()
     vector_store = get_vector_store()
+    target_source = _detect_target_source(query)
+
+    if target_source:
+        # Fetch chunks from the matched source file directly
+        source_filter = Filter(
+            must=[FieldCondition(key="metadata.source", match=MatchValue(value=target_source))]
+        )
+        targeted_docs = vector_store.similarity_search(
+            query,
+            k=settings.top_k,
+            filter=source_filter,
+        )
+
+        # Fill remaining slots with general results, skipping duplicates
+        targeted_ids = {id(d) for d in targeted_docs}
+        general_docs = vector_store.similarity_search(query, k=settings.top_k)
+        extra = [d for d in general_docs if id(d) not in targeted_ids]
+
+        return (targeted_docs + extra)[: settings.top_k]
+
     return vector_store.similarity_search(query, k=settings.top_k)
 
 
