@@ -5,8 +5,7 @@ Uses hybrid approach: keyword-based source filtering + semantic similarity.
 
 from langchain_core.documents import Document
 from app.config import get_settings
-from app.rag.vectorstore import get_vector_store, get_qdrant_client
-from qdrant_client.models import Filter, FieldCondition, MatchValue
+from app.rag.vectorstore import get_vector_store
 
 # Maps query keywords to source files for direct retrieval
 KEYWORD_SOURCE_MAP = {
@@ -48,32 +47,23 @@ def _detect_target_source(query: str) -> str | None:
 
 def retrieve(query: str) -> list[Document]:
     """
-    Hybrid retrieval: if query targets a specific source, fetch those chunks first,
-    then fill remaining slots with general semantic search results.
+    Hybrid retrieval: if query targets a specific source, fetch a larger candidate pool,
+    bubble matching chunks to the top, then fill remaining slots with other results.
     """
     settings = get_settings()
     vector_store = get_vector_store()
     target_source = _detect_target_source(query)
 
+    # Fetch a larger pool so targeted chunks have a chance to appear
+    fetch_k = max(settings.top_k * 3, 30)
+    all_docs = vector_store.similarity_search(query, k=fetch_k)
+
     if target_source:
-        # Fetch chunks from the matched source file directly
-        source_filter = Filter(
-            must=[FieldCondition(key="metadata.source", match=MatchValue(value=target_source))]
-        )
-        targeted_docs = vector_store.similarity_search(
-            query,
-            k=settings.top_k,
-            filter=source_filter,
-        )
+        targeted = [d for d in all_docs if d.metadata.get("source") == target_source]
+        others = [d for d in all_docs if d.metadata.get("source") != target_source]
+        return (targeted + others)[: settings.top_k]
 
-        # Fill remaining slots with general results, skipping duplicates
-        targeted_ids = {id(d) for d in targeted_docs}
-        general_docs = vector_store.similarity_search(query, k=settings.top_k)
-        extra = [d for d in general_docs if id(d) not in targeted_ids]
-
-        return (targeted_docs + extra)[: settings.top_k]
-
-    return vector_store.similarity_search(query, k=settings.top_k)
+    return all_docs[: settings.top_k]
 
 
 def format_context(docs: list[Document]) -> str:
